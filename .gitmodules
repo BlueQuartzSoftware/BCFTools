@@ -1,3 +1,6 @@
 [submodule "3rdparty/hdf5"]
 	path = 3rdparty/hdf5
 	url = https://github.com/HDFGroup/hdf5
+[submodule "3rdparty/pugixml"]
+	path = 3rdparty/pugixml
+	url = https://github.com/zeux/pugixml

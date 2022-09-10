@@ -4,8 +4,11 @@
 #include "BrukerIntegration/BrukerIntegrationStructs.h"
 #include "BrukerIntegrationFilters/BrukerDataLoader.h"
 
-#include "SIMPLib/DataArrays/DataArray.hpp"
-#include "SIMPLib/Math/SIMPLibMath.h"
+//#include "SIMPLib/DataArrays/DataArray.hpp"
+//#include "SIMPLib/Math/SIMPLibMath.h"
+
+#include <hdf5.h>
+#include <H5public.h>
 
 #include "H5Support/H5Lite.h"
 #include "H5Support/H5ScopedErrorHandler.h"
@@ -15,19 +18,38 @@ using namespace H5Support;
 
 #include "SFSNodeItem.h"
 #include "SFSReader.h"
+#include "Base64.hpp"
+#include "StringUtilities.hpp"
 
-#include <QtCore/QDir>
-#include <QtCore/QTemporaryDir>
-#include <QtCore/QTextStream>
+//#include <QtCore/QDir>
+//#include <QtCore/QTemporaryDir>
+//#include <QtCore/QTextStream>
+//#include <QtXml/QDomCharacterData>
 
-#include <QtXml/QDomCharacterData>
+#include <pugixml.hpp>
 
+#include <memory>
 #include <utility>
 #include <cstring>
 #include <array>
 #include <cstddef>
 #include <fstream>
 #include <vector>
+#include <filesystem>
+#include <sstream>
+#include <limits>
+
+#ifdef SIMPL_USE_GHC_FILESYSTEM
+#include <ghc/filesystem.hpp>
+namespace fs = ghc::filesystem;
+#else
+#include <filesystem>
+namespace fs = std::filesystem;
+#endif
+
+
+
+using XmlDocumentType = std::shared_ptr<pugi::xml_document>;
 
 #if defined(__GNUC__) && !defined(__APPLE__)
 #define BDL_POS(var) var.__pos
@@ -154,10 +176,29 @@ std::pair<int32_t, std::string> WriteGrayScaleImage(const std::string& filepath,
   return {0, "No Error"};
 }
 
+
+class TempDirectory
+{
+public:
+  TempDirectory(const std::string& path)
+  : m_Path({path}){}
+
+  ~TempDirectory()
+  {
+    if(fs::exists(m_Path))
+    {
+      fs::remove_all(m_Path);
+    }
+  }
+private:
+  fs::path m_Path;
+};
+
+
 } // namespace
 
 // -----------------------------------------------------------------------------
-BcfHdf5Convertor::BcfHdf5Convertor(QString inputFile, QString outputFile)
+BcfHdf5Convertor::BcfHdf5Convertor(std::string inputFile, std::string outputFile)
 : m_InputFile(std::move(inputFile))
 , m_OutputFile(std::move(outputFile))
 {
@@ -177,27 +218,28 @@ void BcfHdf5Convertor::setFlipPatterns(bool flipPatterns)
 }
 
 // -----------------------------------------------------------------------------
-int32_t writeCameraConfiguration(hid_t semGrpId, hid_t ebsdGrpId, const QString& cameraConfiguration)
+int32_t writeCameraConfiguration(hid_t semGrpId, hid_t ebsdGrpId, const std::string& cameraConfiguration)
 {
-  QString errorStr;
+  std::string errorStr;
   int errorLine = -1;
   int errorColumn = -1;
 
-  QFile device(cameraConfiguration);
-
-  QDomDocument domDocument;
-  QDomElement root;
-
-  if(!domDocument.setContent(&device, true, &errorStr, &errorLine, &errorColumn))
+  // Reads and validates inputted xml data files
+  XmlDocumentType root = std::make_shared<pugi::xml_document>();
+  pugi::xml_parse_result parseResult = root->load_file(cameraConfiguration.c_str());
+  if(!parseResult)
   {
-    QString ss = QObject::tr("Parse error at line %1, column %2:\n%3").arg(errorLine).arg(errorColumn).arg(errorStr);
-    qDebug() << ss;
+    std::stringstream  out;
+    out << "Error on parsing layer data:";
+    out << "File name: " << cameraConfiguration << ", attr value: [" << root->child("node").attribute("attr").value() << "]\n";
+    out << "Error description: " << parseResult.description() << "\n";
+    out << cameraConfiguration << "[" << parseResult.offset << "]\n\n";
+    std::cout << out.str() << std::endl;
     return -7080;
   }
 
-  root = domDocument.documentElement();
-  QDomElement classInstance = root.firstChildElement("ClassInstance");
-  if(classInstance.isNull())
+  auto classInstance = root->first_element_by_path("TCameraConfiguration/ClassInstance");
+  if(classInstance.empty())
   {
     std::cout << "XML DOM entry ClassInstance was not found." << std::endl;
     return -7002;
@@ -205,7 +247,7 @@ int32_t writeCameraConfiguration(hid_t semGrpId, hid_t ebsdGrpId, const QString&
   int32_t err = 0;
 
   // Start gathering the required information from the XML file
-  QString pixelFormat = classInstance.firstChildElement("PixelFormat").text();
+  std::string pixelFormat = classInstance.first_element_by_path("PixelFormat").text().as_string();
   int32_t pixelByteCount = 0;
   if(pixelFormat == "Gray8")
   {
@@ -221,27 +263,28 @@ int32_t writeCameraConfiguration(hid_t semGrpId, hid_t ebsdGrpId, const QString&
 }
 
 // -----------------------------------------------------------------------------
-int32_t writeAuxIndexingOptions(hid_t semGrpId, hid_t ebsdGrpId, const QString& calibrationFile)
+int32_t writeAuxIndexingOptions(hid_t semGrpId, hid_t ebsdGrpId, const std::string& calibrationFile)
 {
-  QString errorStr;
+  std::string errorStr;
   int errorLine = -1;
   int errorColumn = -1;
 
-  QFile device(calibrationFile);
-
-  QDomDocument domDocument;
-  QDomElement root;
-
-  if(!domDocument.setContent(&device, true, &errorStr, &errorLine, &errorColumn))
+  // Reads and validates inputted xml data files
+  XmlDocumentType root = std::make_shared<pugi::xml_document>();
+  pugi::xml_parse_result parseResult = root->load_file(calibrationFile.c_str());
+  if(!parseResult)
   {
-    QString ss = QObject::tr("Parse error at line %1, column %2:\n%3").arg(errorLine).arg(errorColumn).arg(errorStr);
-    qDebug() << ss;
+    std::stringstream  out;
+    out << "Error on parsing layer data:";
+    out << "File name: " << calibrationFile << ", attr value: [" << root->child("node").attribute("attr").value() << "]\n";
+    out << "Error description: " << parseResult.description() << "\n";
+    out << calibrationFile << "[" << parseResult.offset << "]\n\n";
+    std::cout << out.str() << std::endl;
     return -7080;
   }
 
-  root = domDocument.documentElement();
-  QDomElement classInstance = root.firstChildElement("ClassInstance");
-  if(classInstance.isNull())
+  auto classInstance = root->first_element_by_path("TEBSDAuxIndexingOptions/ClassInstance");
+  if(classInstance.empty())
   {
     std::cout << "XML DOM entry ClassInstance was not found." << std::endl;
     return -7002;
@@ -250,60 +293,62 @@ int32_t writeAuxIndexingOptions(hid_t semGrpId, hid_t ebsdGrpId, const QString& 
   int32_t err = 0;
 
   // Start gathering the required information from the XML file
-  int32_t minIndexedBands = classInstance.firstChildElement("MinIndexedBandCount").text().toInt(&ok);
+  int32_t minIndexedBands = classInstance.first_element_by_path("MinIndexedBandCount").text().as_int(-1);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "MinIndexedBands", minIndexedBands);
 
   // Start gathering the required information from the XML file
-  double madMax = classInstance.firstChildElement("MaxMAD").text().toDouble(&ok);
+  double madMax = classInstance.first_element_by_path("MaxMAD").text().as_double(0.0);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "MADMax", madMax);
 
   return err;
 }
 
 // -----------------------------------------------------------------------------
-int32_t writeCalibrationData(hid_t semGrpId, hid_t ebsdGrpId, const QString& calibrationFile, float& pcx, float& pcy)
+int32_t writeCalibrationData(hid_t semGrpId, hid_t ebsdGrpId, const std::string& calibrationFile, float& pcx, float& pcy)
 {
-  QString errorStr;
+  std::string errorStr;
   int errorLine = -1;
   int errorColumn = -1;
 
-  QFile device(calibrationFile);
-
-  QDomDocument domDocument;
-  QDomElement root;
-
-  if(!domDocument.setContent(&device, true, &errorStr, &errorLine, &errorColumn))
+  // Reads and validates inputted xml data files
+  XmlDocumentType root = std::make_shared<pugi::xml_document>();
+  pugi::xml_parse_result parseResult = root->load_file(calibrationFile.c_str());
+  if(!parseResult)
   {
-    QString ss = QObject::tr("Parse error at line %1, column %2:\n%3").arg(errorLine).arg(errorColumn).arg(errorStr);
-    qDebug() << ss;
+    std::stringstream  out;
+    out << "Error on parsing layer data:";
+    out << "File name: " << calibrationFile << ", attr value: [" << root->child("node").attribute("attr").value() << "]\n";
+    out << "Error description: " << parseResult.description() << "\n";
+    out << calibrationFile << "[" << parseResult.offset << "]\n\n";
+    std::cout << out.str() << std::endl;
     return -7080;
   }
 
-  root = domDocument.documentElement();
-  QDomElement classInstance = root.firstChildElement("ClassInstance");
-  if(classInstance.isNull())
+  auto classInstance = root->first_element_by_path("TEBSDCalibration/ClassInstance");
+  if(classInstance.empty())
   {
     std::cout << "XML DOM entry ClassInstance was not found." << std::endl;
     return -7002;
   }
+
   bool ok = false;
   int32_t err = 0;
 
   // Start gathering the required information from the XML file
-  double workingDistance = classInstance.firstChildElement("WorkingDistance").text().toDouble(&ok);
+  double workingDistance = classInstance.first_element_by_path("WorkingDistance").text().as_double(-1.0);
   err = H5Lite::writeScalarDataset(semGrpId, "SEM WD", workingDistance);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "WD", workingDistance);
 
-  double topClip = classInstance.firstChildElement("TopClip").text().toDouble(&ok);
+  double topClip = classInstance.first_element_by_path("TopClip").text().as_double(-1.0);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "TopClip", topClip);
 
-  pcx = classInstance.firstChildElement("PCX").text().toDouble(&ok);
+  pcx = classInstance.first_element_by_path("PCX").text().as_double(-1.0);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "PCX", pcx);
 
-  pcy = classInstance.firstChildElement("PCY").text().toDouble(&ok);
+  pcy = classInstance.first_element_by_path("PCY").text().as_double(-1.0);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "PCX", pcy);
 
-  float sampleTilt = classInstance.firstChildElement("ProbeTilt").text().toDouble(&ok);
+  float sampleTilt = classInstance.first_element_by_path("ProbeTilt").text().as_double(-1.0);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "SampleTilt", sampleTilt);
 
 
@@ -311,27 +356,28 @@ int32_t writeCalibrationData(hid_t semGrpId, hid_t ebsdGrpId, const QString& cal
 }
 
 // -----------------------------------------------------------------------------
-int32_t writeSEMData(hid_t semGrpId, hid_t ebsdGrpId, const QString& semFile)
+int32_t writeSEMData(hid_t semGrpId, hid_t ebsdGrpId, const std::string& semFile)
 {
-  QString errorStr;
+  std::string errorStr;
   int errorLine;
   int errorColumn;
 
-  QFile device(semFile);
-
-  QDomDocument domDocument;
-  QDomElement root;
-
-  if(!domDocument.setContent(&device, true, &errorStr, &errorLine, &errorColumn))
+  // Reads and validates inputted xml data files
+  XmlDocumentType root = std::make_shared<pugi::xml_document>();
+  pugi::xml_parse_result parseResult = root->load_file(semFile.c_str());
+  if(!parseResult)
   {
-    QString ss = QObject::tr("Parse error at line %1, column %2:\n%3").arg(errorLine).arg(errorColumn).arg(errorStr);
-    qDebug() << ss;
+    std::stringstream  out;
+    out << "Error on parsing layer data:";
+    out << "File name: " << semFile << ", attr value: [" << root->child("node").attribute("attr").value() << "]\n";
+    out << "Error description: " << parseResult.description() << "\n";
+    out << semFile << "[" << parseResult.offset << "]\n\n";
+    std::cout << out.str() << std::endl;
     return -7080;
   }
 
-  root = domDocument.documentElement();
-  QDomElement classInstance = root.firstChildElement("ClassInstance");
-  if(classInstance.isNull())
+  auto classInstance = root->first_element_by_path("TRTImageData/ClassInstance");
+  if(classInstance.empty())
   {
     std::cout << "XML DOM entry ClassInstance was not found." << std::endl;
     return -7002;
@@ -339,47 +385,51 @@ int32_t writeSEMData(hid_t semGrpId, hid_t ebsdGrpId, const QString& semFile)
   bool ok = false;
   int32_t err = 0;
 
-  QString date = classInstance.firstChildElement("Date").text();
-  err = H5Lite::writeStringDataset(ebsdGrpId, "Date", date.toStdString());
+  std::string date = classInstance.first_element_by_path("Date").text().as_string("NOT FOUND");
+  err = H5Lite::writeStringDataset(ebsdGrpId, "Date", date);
   err = H5Lite::writeStringAttribute(ebsdGrpId, "Date", "Format (ISO 8601)", "dd.mm.yyyy");
 
-  QString time = classInstance.firstChildElement("Time").text();
-  err = H5Lite::writeStringDataset(ebsdGrpId, "Time", time.toStdString());
+  std::string time = classInstance.first_element_by_path("Time").text().as_string("NOT FOUND");
+  err = H5Lite::writeStringDataset(ebsdGrpId, "Time", time);
   err = H5Lite::writeStringAttribute(ebsdGrpId, "Time", "Format (ISO 8601)", "hh:mm:ss");
 
-  int32_t width = classInstance.firstChildElement("Width").text().toInt(&ok);
+  int32_t width = classInstance.first_element_by_path("Width").text().as_int(0xFFFFFFFF);
   err = H5Lite::writeScalarDataset(semGrpId, "SEM ImageWidth", width);
 
-  int32_t height = classInstance.firstChildElement("Height").text().toInt(&ok);
+  int32_t height = classInstance.first_element_by_path("Height").text().as_int(0xFFFFFFFF);
   err = H5Lite::writeScalarDataset(semGrpId, "SEM ImageHeight", height);
 
   std::vector<hsize_t> tDims = {static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
 
-  float xRes = classInstance.firstChildElement("XCalibration").text().toFloat(&ok);
+  float xRes = classInstance.first_element_by_path("XCalibration").text().as_float(std::numeric_limits<float>::max());
   if(xRes == 0.0) { xRes = 1.0f;}
   err = H5Lite::writeScalarDataset(semGrpId, "SEM XResolution", xRes);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "SEPixelSizeX", xRes);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "XSTEP", xRes);
 
-  float yRes = classInstance.firstChildElement("YCalibration").text().toFloat(&ok);
+  float yRes = classInstance.first_element_by_path("YCalibration").text().as_float(std::numeric_limits<float>::max());
   if(yRes == 0.0) { yRes = 1.0f; }
   err = H5Lite::writeScalarDataset(semGrpId, "SEM YResolution", yRes);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "SEPixelSizeY", yRes);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "YSTEP", yRes);
 
-  int itemSize = classInstance.firstChildElement("ItemSize").text().toInt(&ok);
+  int itemSize = classInstance.first_element_by_path("ItemSize").text().as_int(0xFFFFFFFF);
 
-  int32_t planeCount = classInstance.firstChildElement("PlaneCount").text().toInt(&ok);
+  int32_t planeCount = classInstance.first_element_by_path("PlaneCount").text().as_int(0xFFFFFFFF);
   for(int32_t p = 0; p < planeCount; p++)
   {
-    QString tagName = "Plane" + QString::number(p);
-    QDomElement planeDomEle = classInstance.firstChildElement(tagName);
-    QByteArray b64str = planeDomEle.firstChildElement("Data").text().toLatin1();
-    QByteArray decodedImage = QByteArray::fromBase64(b64str);
-    QString nameDomEle = planeDomEle.firstChildElement("Name").text();
-    QString descDomEle = planeDomEle.firstChildElement("Description").text();
 
-    if(!nameDomEle.isEmpty() && !descDomEle.isEmpty())
+    std::string tagName = "Plane" + std::to_string(p);
+
+    auto planeDomEle = classInstance.first_element_by_path(tagName.c_str());
+    std::string b64str = planeDomEle.first_element_by_path("Data").text().as_string("");
+
+    std::string decodedImage;
+    macaron::Base64::Decode(b64str, decodedImage);
+    std::string nameDomEle = planeDomEle.first_element_by_path("Name").text().as_string("NOT FOUND");
+    std::string descDomEle = planeDomEle.first_element_by_path("Description").text().as_string("NOT FOUND");
+
+    if(!nameDomEle.empty() && !descDomEle.empty())
     {
       if(itemSize == 1)
       {
@@ -406,15 +456,15 @@ int32_t writeSEMData(hid_t semGrpId, hid_t ebsdGrpId, const QString& semFile)
       err = H5Lite::writeStringAttribute(ebsdGrpId, "SEM Image", "IMAGE_SUBCLASS", "IMAGE_INDEXED");
       err = H5Lite::writeStringAttribute(ebsdGrpId, "SEM Image", "IMAGE_VERSION", "1.2");
 
-      if(!nameDomEle.isEmpty())
+      if(!nameDomEle.empty())
       {
-        err = H5Lite::writeStringAttribute(semGrpId, "SEM Image", "Name", nameDomEle.toStdString());
-        err = H5Lite::writeStringAttribute(ebsdGrpId, "SEM Image", "Name", nameDomEle.toStdString());
+        err = H5Lite::writeStringAttribute(semGrpId, "SEM Image", "Name", nameDomEle);
+        err = H5Lite::writeStringAttribute(ebsdGrpId, "SEM Image", "Name", nameDomEle);
       }
-      if(!descDomEle.isEmpty())
+      if(!descDomEle.empty())
       {
-        err = H5Lite::writeStringAttribute(semGrpId, "SEM Image", "Description", descDomEle.toStdString());
-        err = H5Lite::writeStringAttribute(ebsdGrpId, "SEM Image", "Description", descDomEle.toStdString());
+        err = H5Lite::writeStringAttribute(semGrpId, "SEM Image", "Description", descDomEle);
+        err = H5Lite::writeStringAttribute(ebsdGrpId, "SEM Image", "Description", descDomEle);
       }
     }
   }
@@ -422,13 +472,13 @@ int32_t writeSEMData(hid_t semGrpId, hid_t ebsdGrpId, const QString& semFile)
   float semKV = 0.0f;
   float semMag = -1.0f;
 
-  QDomElement trtHeaderedClass = classInstance.firstChildElement("TRTHeaderedClass");
-  QDomElement tRTREMHeader = trtHeaderedClass.firstChildElement("ClassInstance");
-  if(!tRTREMHeader.isNull())
+  auto trtHeaderedClass = classInstance.first_element_by_path("TRTHeaderedClass");
+  auto tRTREMHeader = trtHeaderedClass.first_element_by_path("ClassInstance");
+  if(!tRTREMHeader.empty())
   {
-    semKV = tRTREMHeader.firstChildElement("Energy").text().toFloat(&ok);
-    semMag = tRTREMHeader.firstChildElement("Magnification").text().toFloat(&ok);
-    //    float wd = tRTREMHeader.firstChildElement("WorkingDistance").text().toFloat(&ok);
+    semKV = tRTREMHeader.first_element_by_path("Energy").text().as_float(std::numeric_limits<float>::max());
+    semMag = tRTREMHeader.first_element_by_path("Magnification").text().as_float(std::numeric_limits<float>::max());
+    //    float wd = tRTREMHeader.first_element_by_path("WorkingDistance").text().as_float(std::numeric_limits<float>::max();
     //    err = H5Lite::writeScalarDataset(semGrpId, "SEM WD", wd);
   }
   err = H5Lite::writeScalarDataset(semGrpId, "SEM KV", semKV);
@@ -440,135 +490,139 @@ int32_t writeSEMData(hid_t semGrpId, hid_t ebsdGrpId, const QString& semFile)
 }
 
 // -----------------------------------------------------------------------------
-int32_t writePhaseInformation(hid_t headerGrpId, const QString& phaseListFile)
+int32_t writePhaseInformation(hid_t headerGrpId, const std::string& phaseListFile)
 {
 
-  hid_t phaseGrpId = H5Utilities::createGroup(headerGrpId, Bruker::Header::Phases.toStdString());
+  hid_t phaseGrpId = H5Utilities::createGroup(headerGrpId, Bruker::Header::Phases);
   H5GroupAutoCloser phaseGrpAutoClose(phaseGrpId);
-  QString errorStr;
+  std::string errorStr;
   int errorLine;
   int errorColumn;
 
-  QFile device(phaseListFile);
-
-  QDomDocument domDocument;
-  QDomElement root;
-
-  if(!domDocument.setContent(&device, true, &errorStr, &errorLine, &errorColumn))
+  // Reads and validates inputted xml data files
+  XmlDocumentType root = std::make_shared<pugi::xml_document>();
+  pugi::xml_parse_result parseResult = root->load_file(phaseListFile.c_str());
+  if(!parseResult)
   {
-    QString ss = QObject::tr("Parse error at line %1, column %2:\n%3").arg(errorLine).arg(errorColumn).arg(errorStr);
-    std::cout << ss.toStdString() << std::endl;
-    return -70000;
+    std::stringstream  out;
+    out << "Error on parsing layer data:";
+    out << "File name: " << phaseListFile << ", attr value: [" << root->child("node").attribute("attr").value() << "]\n";
+    out << "Error description: " << parseResult.description() << "\n";
+    out << phaseListFile << "[" << parseResult.offset << "]\n\n";
+    std::cout << out.str() << std::endl;
+    return -7080;
   }
 
-  root = domDocument.documentElement();
-
-  QDomElement classInstance = root.firstChildElement("ClassInstance");
-  if(classInstance.isNull())
+  auto classInstance = root->first_element_by_path("TEBSDExtPhaseEntryList/ClassInstance");
+  if(classInstance.empty())
   {
     std::cout << "XML DOM entry ClassInstance was not found." << std::endl;
     return -7002;
   }
 
-  QDomElement childClassInstances = classInstance.firstChildElement("ChildClassInstances");
-  if(childClassInstances.isNull())
+  auto childClassInstances = classInstance.first_element_by_path("ChildClassInstances");
+  if(childClassInstances.empty())
   {
     std::cout << "XML DOM entry ChildClassInstances was not found." << std::endl;
     return -7003;
   }
 
-  QDomNodeList phaseInstaces = childClassInstances.childNodes();
-  int32_t count = phaseInstaces.count();
-  for(int32_t i = 0; i < count; i++)
+  auto phaseInstances = childClassInstances.children();
+  int phaseIndex = 1;
+  for(const auto& phaseInstance : phaseInstances)
   {
     int32_t err = 0;
     bool ok = true;
-    hid_t grpId = H5Utilities::createGroup(phaseGrpId, QString::number(i + 1).toStdString());
+    hid_t grpId = H5Utilities::createGroup(phaseGrpId, std::to_string(phaseIndex++));
     H5GroupAutoCloser groupAutoCloser(grpId);
 
-    QDomNode phaseInstance = phaseInstaces.at(i);
-    QString name = phaseInstance.toElement().attribute("Name");
+    //QDomNode phaseInstance = phaseInstances.at(i);
+    std::string name = phaseInstance.attribute("Name").as_string("NOT FOUND");
 
-    err = H5Lite::writeStringDataset(grpId, "Name", name.toStdString());
+    err = H5Lite::writeStringDataset(grpId, "Name", name);
 
-    QDomNode tEBSDPhaseEntry = phaseInstance.firstChildElement("TEBSDPhaseEntry");
+    auto tEBSDPhaseEntry = phaseInstance.first_element_by_path("TEBSDPhaseEntry");
 
-    //    phaseInstance.firstChildElement("POS0").text() );
+    //    phaseInstance.first_element_by_path("POS0").text() );
 
-    //    phaseInstance.firstChildElement("REF").text() );
+    //    phaseInstance.first_element_by_path("REF").text() );
 
-    //    phaseInstance.firstChildElement("Complete").text() );
+    //    phaseInstance.first_element_by_path("Complete").text() );
 
-    //    phaseInstance.firstChildElement("BPS1").text() );
+    //    phaseInstance.first_element_by_path("BPS1").text() );
 
-    //    phaseInstance.firstChildElement("BPS2").text() );
-    QString strValue = tEBSDPhaseEntry.firstChildElement("Chem").text();
-    err = H5Lite::writeStringDataset(grpId, "Formula", strValue.toStdString());
+    //    phaseInstance.first_element_by_path("BPS2").text() );
+    std::string strValue = tEBSDPhaseEntry.first_element_by_path("Chem").text().as_string("NOT FOUND");
+    err = H5Lite::writeStringDataset(grpId, "Formula", strValue);
 
-    //    phaseInstance.firstChildElement("DENSITY").text() );
+    //    phaseInstance.first_element_by_path("DENSITY").text() );
 
-    //    phaseInstance.firstChildElement("Elem").text() );
+    //    phaseInstance.first_element_by_path("Elem").text() );
 
     /* Parse a DefaultGlideSystem subclass */
     //    m_DefaultGlideSystem = DefaultGlideSystem::Pointer(new DefaultGlideSystem(parent()));
-    //    QDomElement ele_DefaultGlideSystem = phaseInstance.firstChildElement("DefaultGlideSystem");
+    //    QDomElement ele_DefaultGlideSystem = phaseInstance.first_element_by_path("DefaultGlideSystem");
     //    err = m_DefaultGlideSystem->parse(ele_DefaultGlideSystem);
 
-    //    phaseInstance.firstChildElement("ISUSERDB").text() );
+    //    phaseInstance.first_element_by_path("ISUSERDB").text() );
 
-    //    phaseInstance.firstChildElement("PKEY").text() );
+    //    phaseInstance.first_element_by_path("PKEY").text() );
 
-    //    phaseInstance.firstChildElement("DBNAME").text() );
+    //    phaseInstance.first_element_by_path("DBNAME").text() );
 
     /* Parse a Cell subclass */
     //    m_Cell = Cell::Pointer(new Cell(parent()));
-    QDomElement ele_Cell = tEBSDPhaseEntry.firstChildElement("Cell");
+    auto ele_Cell = tEBSDPhaseEntry.first_element_by_path("Cell");
     {
       std::vector<float> latticeConstants(6);
-      QStringList values = ele_Cell.firstChildElement("Dim").text().split(",");
-      latticeConstants[0] = values[0].toFloat(&ok);
-      latticeConstants[1] = values[1].toFloat(&ok);
-      latticeConstants[2] = values[2].toFloat(&ok);
-      values = ele_Cell.firstChildElement("Angles").text().split(",");
-      latticeConstants[3] = values[0].toFloat(&ok);
-      latticeConstants[4] = values[1].toFloat(&ok);
-      latticeConstants[5] = values[2].toFloat(&ok);
+      std::string dataLine = ele_Cell.first_element_by_path("Dim").text().as_string("0.0,0.0,0.0");
+      std::vector<std::string> values = complex::StringUtilities::split_2(dataLine, ',');
+      latticeConstants[0] = std::stof(values[0]);
+      latticeConstants[1] = std::stof(values[1]);
+      latticeConstants[2] = std::stof(values[2]);
+
+      dataLine = ele_Cell.first_element_by_path("Angles").text().as_string("0.0,0.0,0.0");
+      values = complex::StringUtilities::split_2(dataLine, ',');
+
+      latticeConstants[3] = std::stof(values[0]);
+      latticeConstants[4] = std::stof(values[1]);
+      latticeConstants[5] = std::stof(values[2]);
       std::vector<hsize_t> dims = {6};
       err = H5Lite::writeVectorDataset(grpId, "LatticeConstants", dims, latticeConstants);
     }
 
     //    err = m_Cell->parse(ele_Cell);
 
-    //    phaseInstance.firstChildElement("MU").text() );
+    //    phaseInstance.first_element_by_path("MU").text() );
 
-    //    phaseInstance.firstChildElement("USED").text() );
+    //    phaseInstance.first_element_by_path("USED").text() );
 
-    //    phaseInstance.firstChildElement("ENTRYID").text() );
+    //    phaseInstance.first_element_by_path("ENTRYID").text() );
 
-    //    phaseInstance.firstChildElement("Encrypted").text() );
+    //    phaseInstance.first_element_by_path("Encrypted").text() );
 
-    int32_t se = tEBSDPhaseEntry.firstChildElement("SE").text().toInt(&ok);
+    int32_t se = tEBSDPhaseEntry.first_element_by_path("SE").text().as_int(0xFFFFFFFF);
     err = H5Lite::writeScalarDataset(grpId, "Setting", se);
 
-    //    phaseInstance.firstChildElement("CC").text() );
+    //    phaseInstance.first_element_by_path("CC").text() );
 
-    //    phaseInstance.firstChildElement("REFLVERSION").text() );
+    //    phaseInstance.first_element_by_path("REFLVERSION").text() );
 
-    strValue = tEBSDPhaseEntry.firstChildElement("SG").text();
-    err = H5Lite::writeStringDataset(grpId, "SpaceGroup", strValue.toStdString());
+    strValue = tEBSDPhaseEntry.first_element_by_path("SG").text().as_string("NOT FOUND");
+    err = H5Lite::writeStringDataset(grpId, "SpaceGroup", strValue);
 
-    int32_t it = tEBSDPhaseEntry.firstChildElement("IT").text().toInt(&ok);
+    int32_t it = tEBSDPhaseEntry.first_element_by_path("IT").text().as_int(0xFFFFFFFF);
     err = H5Lite::writeScalarDataset(grpId, "IT", it);
 
     hid_t atGrpId = H5Utilities::createGroup(grpId, "AtomPositions");
     H5GroupAutoCloser atGrpIdAutoCloser(atGrpId);
     // This tells us the number of atoms that we need to parse
-    it = tEBSDPhaseEntry.firstChildElement("AT").text().toInt(&ok);
+    it = tEBSDPhaseEntry.first_element_by_path("AT").text().as_int(0xFFFFFFFF);
     for(int32_t atom = 1; atom <= it; atom++)
     {
-      QString tagName = "POS" + QString::number(atom - 1);
-      strValue = tEBSDPhaseEntry.firstChildElement(tagName).text();
-      err = H5Lite::writeStringDataset(atGrpId, QString::number(atom).toStdString(), strValue.toStdString());
+      std::string tagName = "POS" + std::to_string(atom - 1);
+      strValue = tEBSDPhaseEntry.first_element_by_path(tagName.c_str()).text().as_string("NOT FOUND");
+      err = H5Lite::writeStringDataset(atGrpId, std::to_string(atom), strValue);
     }
   }
 
@@ -577,7 +631,7 @@ int32_t writePhaseInformation(hid_t headerGrpId, const QString& phaseListFile)
 
 // -----------------------------------------------------------------------------
 template<typename T>
-int32_t writeDataArrayToHdf5(DataArray<T>* data, hid_t grpId, size_t numElements)
+int32_t writeDataArrayToHdf5(EbsdDataArray<T>* data, hid_t grpId, size_t numElements)
 {
   std::vector<size_t> cDims = data->getComponentDimensions();
   if(cDims.size() == 1 && cDims[0] == 1)
@@ -592,24 +646,24 @@ int32_t writeDataArrayToHdf5(DataArray<T>* data, hid_t grpId, size_t numElements
     dims.push_back(dim);
   }
 
-  int32_t err = H5Lite::writePointerDataset(grpId, data->getName().toStdString(), static_cast<int32_t>(dims.size()), dims.data(), data->getPointer(0));
+  int32_t err = H5Lite::writePointerDataset(grpId, data->getName(), static_cast<int32_t>(dims.size()), dims.data(), data->getPointer(0));
   return err;
 }
 
 // -----------------------------------------------------------------------------
-int32_t analyzeFrameDescriptionFile(const QString& descFile)
+int32_t analyzeFrameDescriptionFile(const std::string& descFile)
 {
   std::cout << "************** Frame Description File START ****************************" << std::endl;
-  QString filePath = descFile;
-  QFileInfo descFileInfo(filePath);
-  if(!descFileInfo.exists())
+  if(!fs::exists(descFile))
   {
-    std::cout << "The FrameDescription File does not exist: '" << filePath.toStdString() << "'" << std::endl;
+    std::cout << "The FrameDescription File does not exist: '" << descFile << "'" << std::endl;
     return -10;
   }
 
   // Open the FrameData File
-  FILE* f = fopen(descFileInfo.absoluteFilePath().toStdString().c_str(), "rb");
+  fs::path inputPath(descFile);
+  std::string absolutPath = fs::absolute(inputPath).string();
+  FILE* f = fopen(absolutPath.c_str(), "rb");
   if(nullptr == f)
   {
     std::cout << "Could not open the FrameData File" << std::endl;
@@ -652,27 +706,26 @@ int32_t analyzeFrameDescriptionFile(const QString& descFile)
 // -----------------------------------------------------------------------------
 template <typename T>
 int32_t writePatternData(const SFSReader& sfsFile, hid_t native_type, int32_t mapWidth, int32_t mapHeight, int32_t ebspWidth,
-                         int32_t ebspHeight, bool flipPatterns, const QString& tempDir, const QString& dataFile,
-                         const QString& descFile, hid_t dataGrpId)
+                         int32_t ebspHeight, bool flipPatterns, const std::string& tempDir, const std::string& dataFile,
+                         const std::string& descFile, hid_t dataGrpId)
 {
   int32_t err = 0;
   // ===================================================
   // Get the XBEAM and YBEAM data from the HDF5 file
   std::vector<int32_t> xbeam;
-  err = H5Lite::readVectorDataset(dataGrpId, Bruker::IndexingResults::XBEAM.toStdString(), xbeam);
+  err = H5Lite::readVectorDataset(dataGrpId, Bruker::IndexingResults::XBEAM, xbeam);
 
   std::vector<int32_t> ybeam;
-  err = H5Lite::readVectorDataset(dataGrpId, Bruker::IndexingResults::YBEAM.toStdString(), ybeam);
+  err = H5Lite::readVectorDataset(dataGrpId, Bruker::IndexingResults::YBEAM, ybeam);
 
   // ===================================================
   // Check the FrameDescription File exists
-  QString filePath = descFile;
-  QFileInfo descFileInfo(filePath);
-  if(!descFileInfo.exists())
+  if(!fs::exists(descFile))
   {
-    std::cout << "The FrameDescription File does not exist: '" << filePath.toStdString() << "'" << std::endl;
+    std::cout << "The FrameDescription File does not exist: '" << descFile << "'" << std::endl;
     return -10;
   }
+
   err = analyzeFrameDescriptionFile(descFile);
   if(err < 0)
   {
@@ -683,7 +736,9 @@ int32_t writePatternData(const SFSReader& sfsFile, hid_t native_type, int32_t ma
   // data starts in the FrameData file.
   std::vector<size_t> frameDescription;
   {
-    FILE* f = fopen(descFileInfo.absoluteFilePath().toStdString().c_str(), "rb");
+    fs::path inputPath(descFile);
+    std::string absolutPath = fs::absolute(inputPath).string();
+    FILE* f = fopen(absolutPath.c_str(), "rb");
     FrameDescriptionHeader_t descHeader;
     size_t nRead = fread(&descHeader, 12, 1, f);
     frameDescription.resize(descHeader.patternCount);
@@ -693,24 +748,24 @@ int32_t writePatternData(const SFSReader& sfsFile, hid_t native_type, int32_t ma
 
   // ===================================================
   // Extract the FrameData file from the .bcf file. this can take a bit....
-  err = sfsFile.extractFile(tempDir.toStdString(), dataFile.toStdString());
+  err = sfsFile.extractFile(tempDir, dataFile);
   if(err != 0)
   {
-    std::cout << "Error extracting the " << dataFile.toStdString() << ". This data set will not be included in the resulting HDF5 file." << std::endl;
+    std::cout << "Error extracting the " << dataFile << ". This data set will not be included in the resulting HDF5 file." << std::endl;
     return err;
   }
 
-  filePath = tempDir + "/" + dataFile;
-  QFileInfo dataFileInfo(filePath);
-  if(!dataFileInfo.exists())
+  fs::path filePath = tempDir + "/" + dataFile;
+  if(!fs::exists(filePath))
   {
-    std::cout << "The FrameData File does not exist: '" << filePath.toStdString() << "'" << std::endl;
+    std::cout << "The FrameData File does not exist: '" << filePath << "'" << std::endl;
     return -11;
   }
-  qint64 filesize = dataFileInfo.size();
+  auto filesize = fs::file_size(filePath);
 
   // Open the FrameData File
-  FILE* f = fopen(dataFileInfo.absoluteFilePath().toStdString().c_str(), "rb");
+  std::string absolutPath = fs::absolute(filePath).string();
+  FILE* f = fopen(absolutPath.c_str(), "rb");
   if(nullptr == f)
   {
     std::cout << "Could not open the FrameData File" << std::endl;
@@ -752,13 +807,13 @@ int32_t writePatternData(const SFSReader& sfsFile, hid_t native_type, int32_t ma
   status = H5Pset_fill_value(cparms, native_type, &fillvalue);
 
   // Create a new dataset within the file using cparms creation properties.
-  hid_t dataset = H5Dcreate2(dataGrpId, Bruker::IndexingResults::EBSP.toStdString().c_str(), native_type, dataspace, H5P_DEFAULT, cparms, H5P_DEFAULT);
+  hid_t dataset = H5Dcreate2(dataGrpId, Bruker::IndexingResults::EBSP.c_str(), native_type, dataspace, H5P_DEFAULT, cparms, H5P_DEFAULT);
   hid_t filespace = 0;
 
   size_t beamIdx = 0;
   for(int32_t y = 0; y < mapHeight; y++)
   {
-    std::cout << dataFileInfo.fileName().toStdString() << " Writing Row " << y << "/" << mapHeight << "\r";
+    std::cout << filePath.filename() << " Writing Row " << y << "/" << mapHeight << "\r";
     std::cout.flush();
 
     for(int32_t x = 0; x < mapWidth; x++)
@@ -883,32 +938,38 @@ void BcfHdf5Convertor::execute()
 
   // We are going to construct a QTemporaryDir _templatepath_ variable so we use a temp
   // location next to the input file. This *should* be ok for most situations.
-  // Qt will clean up the temp dir when it goes out of scope.
-  QFileInfo ifInfo(m_InputFile);
-  QString tmpPath = ifInfo.absolutePath() + "/" + ifInfo.baseName() + "_XXXXXX";
-  QTemporaryDir tempDir(tmpPath);
-  if(!tempDir.isValid())
+  // Qt will clean up the temp dir when it goes out of scope
+
+  fs::path ifInfo(m_InputFile);
+  std::string tmpDir = ifInfo.parent_path().string() + "/" + ifInfo.stem().string() + "_XXXXXX";
+
+  std::error_code errorCode;
+  auto result =  fs::create_directory({tmpDir}, errorCode);
+  if(!result && errorCode.value() != 0)
   {
     m_ErrorCode = -7000;
-    m_ErrorMessage = QString("Temp Directory could not be created.");
+    m_ErrorMessage = std::string("Temp Directory could not be created.");
     return;
   }
 
+  TempDirectory tempDirectory(tmpDir);
+
   int32_t err = 0;
 
-  hid_t fid = H5Utilities::createFile(m_OutputFile.toStdString());
+  hid_t fid = H5Utilities::createFile(m_OutputFile);
   H5ScopedFileSentinel fileSentinel(fid, k_ShowHdf5Errors);
 
   // ***************************************************************************
   // IF ANYTHING IN HERE CHANGES YOU NEED TO INCREMENT THE FILEVERSION NUMBER
-  // WHICH INDICATES THAT THE ORGANIZATION HAS BEED APPENDED/EDITED/REVISED.
+  // WHICH INDICATES THAT THE ORGANIZATION HAS BEEN APPENDED/EDITED/REVISED.
   // ***************************************************************************
   err = H5Lite::writeScalarAttribute(fid, "/", "FileVersion", ::k_FileVersion);
 
-  QFileInfo fi(m_InputFile);
-  QString baseInputFileName = fi.completeBaseName();
 
-  hid_t topGrpId = H5Utilities::createGroup(fid, baseInputFileName.toStdString());
+  fs::path fi(m_InputFile);
+  std::string baseInputFileName = fi.stem().string();
+
+  hid_t topGrpId = H5Utilities::createGroup(fid, baseInputFileName);
   fileSentinel.addGroupId(topGrpId);
 
   hid_t ebsdGrpId = H5Utilities::createGroup(topGrpId, k_EBSD);
@@ -928,7 +989,7 @@ void BcfHdf5Convertor::execute()
   if(err < 0)
   {
     m_ErrorCode = err;
-    m_ErrorMessage = QString("Manufacturer Dataset was not written");
+    m_ErrorMessage = std::string("Manufacturer Dataset was not written");
     return;
   }
 
@@ -937,56 +998,56 @@ void BcfHdf5Convertor::execute()
   if(err < 0)
   {
     m_ErrorCode = err;
-    m_ErrorMessage = QString("Version Dataset was not written");
+    m_ErrorMessage = std::string("Version Dataset was not written");
     return;
   }
 
   SFSReader sfsFile;
-  sfsFile.parseFile(m_InputFile.toStdString());
-  QString outputFile;
-  QTextStream outFileStrm(&outputFile);
+  sfsFile.parseFile(m_InputFile);
 
-  std::cout << "Using Temp Dir: " << tempDir.path().toStdString() << std::endl;
+  std::stringstream outFileStrm;
 
-  outputFile.clear();
+  std::cout << "Using Temp Dir: " << tmpDir << std::endl;
+
+  outFileStrm.str("");
   outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::FrameDescription;
-  QString descFile = outputFile;
+  std::string descFile = outFileStrm.str();
   // std::cout << "Extracting FrameDescription";
-  err = sfsFile.extractFile(tempDir.path().toStdString(), descFile.toStdString());
+  err = sfsFile.extractFile(tmpDir, descFile);
   if(err < 0)
   {
     m_ErrorCode = -7020;
-    m_ErrorMessage = QString("Could not extract EBSDData/FrameDescription File.");
+    m_ErrorMessage = std::string("Could not extract EBSDData/FrameDescription File.");
     return;
   }
 
-  outputFile.clear();
+  outFileStrm.str("");
   outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::IndexingResults;
-  QString indexingResultsFile = outputFile;
+  std::string indexingResultsFile = outFileStrm.str();
   // std::cout << "Extracting IndexingResults";
-  err = sfsFile.extractFile(tempDir.path().toStdString(), indexingResultsFile.toStdString());
+  err = sfsFile.extractFile(tmpDir, indexingResultsFile);
   if(err < 0)
   {
     m_ErrorCode = -7030;
-    m_ErrorMessage = QString("Could not extract EBSDData/IndexingResults File.");
+    m_ErrorMessage = std::string("Could not extract EBSDData/IndexingResults File.");
     return;
   }
 
-  outputFile.clear();
+  outFileStrm.str("");
   outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::Auxiliarien;
-  QString auxiliarienFile = outputFile;
+  std::string auxiliarienFile = outFileStrm.str();
   // std::cout << "Extracting Auxiliarien";
-  err = sfsFile.extractFile(tempDir.path().toStdString(), auxiliarienFile.toStdString());
+  err = sfsFile.extractFile(tmpDir, auxiliarienFile);
   if(err < 0)
   {
     m_ErrorCode = -7040;
-    m_ErrorMessage = QString("Could not extract EBSDData/Auxiliarien File.");
+    m_ErrorMessage = std::string("Could not extract EBSDData/Auxiliarien File.");
     return;
   }
 
-  outputFile.clear();
-  outFileStrm << tempDir.path() << "/" << Bruker::Files::EBSDData;
-  QString ebsdDataDir = outputFile;
+  outFileStrm.str("");
+  outFileStrm << tmpDir << "/" << Bruker::Files::EBSDData;
+  std::string ebsdDataDir = outFileStrm.str();
 
   // Read the Dimensions of the Map and EBSP
   int32_t mapHeight;
@@ -1008,30 +1069,30 @@ void BcfHdf5Convertor::execute()
 
   // Scope this entire next part so that the arrays get cleaned up when we are done....
   {
-    UInt16ArrayType::Pointer indices = UInt16ArrayType::CreateArray(numElements, cDims, "Positions", true);
+    UInt16Array::Pointer indices = UInt16Array::CreateArray(numElements, cDims, "Positions", true);
     cDims[0] = 3;
-    FloatArrayType::Pointer eulers = FloatArrayType::CreateArray(numElements, cDims, Bruker::IndexingResults::Eulers, true);
+    FloatArray::Pointer eulers = FloatArray::CreateArray(numElements, cDims, Bruker::IndexingResults::Eulers, true);
 
     cDims[0] = 1;
-    FloatArrayType::Pointer patQual = FloatArrayType::CreateArray(numElements, cDims, Bruker::IndexingResults::RadonQuality, true);
-    UInt16ArrayType::Pointer detectedBands = UInt16ArrayType::CreateArray(numElements, cDims, Bruker::IndexingResults::RadonBandCount, true);
-    Int16ArrayType::Pointer phases = Int16ArrayType::CreateArray(numElements, cDims, Bruker::IndexingResults::Phase, true);
-    UInt16ArrayType::Pointer indexedBands = UInt16ArrayType::CreateArray(numElements, cDims, Bruker::IndexingResults::NIndexedBands, true);
-    FloatArrayType::Pointer bmm = FloatArrayType::CreateArray(numElements, cDims, Bruker::IndexingResults::MAD, true);
+    FloatArray::Pointer patQual = FloatArray::CreateArray(numElements, cDims, Bruker::IndexingResults::RadonQuality, true);
+    UInt16Array::Pointer detectedBands = UInt16Array::CreateArray(numElements, cDims, Bruker::IndexingResults::RadonBandCount, true);
+    Int16Array::Pointer phases = Int16Array::CreateArray(numElements, cDims, Bruker::IndexingResults::Phase, true);
+    UInt16Array::Pointer indexedBands = UInt16Array::CreateArray(numElements, cDims, Bruker::IndexingResults::NIndexedBands, true);
+    FloatArray::Pointer bmm = FloatArray::CreateArray(numElements, cDims, Bruker::IndexingResults::MAD, true);
 
-    descFile = tempDir.path() + "/" + Bruker::Files::EBSDData + "/" + Bruker::Files::FrameDescription;
-    indexingResultsFile = tempDir.path() + "/" + Bruker::Files::EBSDData + "/" + Bruker::Files::IndexingResults;
+    descFile = tmpDir + "/" + Bruker::Files::EBSDData + "/" + Bruker::Files::FrameDescription;
+    indexingResultsFile = tmpDir + "/" + Bruker::Files::EBSDData + "/" + Bruker::Files::IndexingResults;
 
     err = BrukerDataLoader::LoadIndexingResults(descFile, indexingResultsFile, indices, eulers, patQual, detectedBands, phases, indexedBands, bmm, mapWidth, mapHeight, roi, m_Reorder);
     if(err < 0)
     {
       m_ErrorCode = -7050;
-      m_ErrorMessage = QString("Error Reading IndexingResults from extracted file: ");
+      m_ErrorMessage = std::string("Error Reading IndexingResults from extracted file: ");
       return;
     }
 
     // Write all the data to the HDF5 file with conversions
-    Int32ArrayType::Pointer i32Array = Int32ArrayType::CreateArray(numElements, Bruker::IndexingResults::XBEAM, true);
+    Int32Array::Pointer i32Array = Int32Array::CreateArray(numElements, Bruker::IndexingResults::XBEAM, true);
     for(size_t i = 0; i < numElements; i++)
     {
       auto value = static_cast<int32_t>(indices->getComponent(i, 0));
@@ -1052,15 +1113,15 @@ void BcfHdf5Convertor::execute()
     err = writeDataArrayToHdf5(i32Array.get(), semGrpId, numElements);
 
     // Convert from a single array of Eulers to 3 separate arrays and convert to degrees .. why?
-    std::vector<QString> names = {{Bruker::IndexingResults::phi1, Bruker::IndexingResults::PHI, Bruker::IndexingResults::phi2}};
+    std::vector<std::string> names = {{Bruker::IndexingResults::phi1, Bruker::IndexingResults::PHI, Bruker::IndexingResults::phi2}};
     std::vector<int32_t> comp = {{0, 1, 2}};
-    FloatArrayType::Pointer euler = FloatArrayType::CreateArray(numElements, Bruker::IndexingResults::phi1, true);
+    FloatArray::Pointer euler = FloatArray::CreateArray(numElements, Bruker::IndexingResults::phi1, true);
     for(size_t c = 0; c < 3; c++)
     {
       euler->setName(names.at(c));
       for(size_t i = 0; i < numElements; i++)
       {
-        float value = eulers->getComponent(i, c) * SIMPLib::Constants::k_180OverPiD;
+        float value = eulers->getComponent(i, c) * 57.295779513082323;
         euler->setValue(i, value);
       }
       err = writeDataArrayToHdf5(euler.get(), dataGrpId, numElements);
@@ -1102,59 +1163,59 @@ void BcfHdf5Convertor::execute()
 
   // Write all the Header information
   {
-    outputFile.clear();
+    outFileStrm.str("");
     outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::PhaseList;
-    QString phaseListFile = outputFile;
+    std::string phaseListFile = outFileStrm.str();
     // std::cout << "Extracting PhaseList";
-    err = sfsFile.extractFile(tempDir.path().toStdString(), phaseListFile.toStdString());
-    phaseListFile = tempDir.path() + "/" + phaseListFile;
+    err = sfsFile.extractFile(tmpDir, phaseListFile);
+    phaseListFile = tmpDir + "/" + phaseListFile;
     if(err == 0)
     {
-      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::NCOLS.toStdString(), mapWidth);
-      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::NROWS.toStdString(), mapHeight);
-      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::NPoints.toStdString(), numElements);
-      err = H5Lite::writeStringDataset(headerGrpId, Bruker::Header::OriginalFile.toStdString(), m_InputFile.toStdString());
-      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::PatternWidth.toStdString(), ebspWidth);
-      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::PatternHeight.toStdString(), ebspHeight);
-      err = H5Lite::writeStringDataset(headerGrpId, Bruker::Header::GridType.toStdString(), Bruker::Header::isometric.toStdString());
+      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::NCOLS, mapWidth);
+      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::NROWS, mapHeight);
+      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::NPoints, numElements);
+      err = H5Lite::writeStringDataset(headerGrpId, Bruker::Header::OriginalFile, m_InputFile);
+      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::PatternWidth, ebspWidth);
+      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::PatternHeight, ebspHeight);
+      err = H5Lite::writeStringDataset(headerGrpId, Bruker::Header::GridType, Bruker::Header::isometric);
       double zOffset = 0.0;
-      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::ZOffset.toStdString(), zOffset);
+      err = H5Lite::writeScalarDataset(headerGrpId, Bruker::Header::ZOffset, zOffset);
       writePhaseInformation(headerGrpId, phaseListFile);
     }
   }
 
   // Write the SEM Data
   {
-    outputFile.clear();
+    outFileStrm.str("");
     outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::SEMImage;
-    QString semFile = outputFile;
+    std::string semFile = outFileStrm.str();
     // std::cout << "Extracting SEIMImage";
-    err = sfsFile.extractFile(tempDir.path().toStdString(), semFile.toStdString());
+    err = sfsFile.extractFile(tmpDir, semFile);
     if(err < 0)
     {
       m_ErrorCode = -7060;
-      m_ErrorMessage = QString("Could not extract EBSDData/SEMImage File.");
+      m_ErrorMessage = std::string("Could not extract EBSDData/SEMImage File.");
       return;
     }
-    semFile = tempDir.path() + "/" + semFile;
+    semFile = tmpDir + "/" + semFile;
 
     writeSEMData(semGrpId, headerGrpId, semFile);
   }
 
   // Write the Calibration Data
   {
-    outputFile.clear();
+    outFileStrm.str("");
     outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::Calibration;
-    QString semFile = outputFile;
+    std::string semFile = outFileStrm.str();
     // std::cout << "Extracting Calibration";
-    err = sfsFile.extractFile(tempDir.path().toStdString(), semFile.toStdString());
+    err = sfsFile.extractFile(tmpDir, semFile);
     if(err < 0)
     {
       m_ErrorCode = -7060;
-      m_ErrorMessage = QString("Could not extract EBSDData/Calibration File.");
+      m_ErrorMessage = std::string("Could not extract EBSDData/Calibration File.");
       return;
     }
-    semFile = tempDir.path() + "/" + semFile;
+    semFile = tmpDir + "/" + semFile;
 
     float pcx = 0.0f;
     float pcy = 0.0f;
@@ -1174,18 +1235,18 @@ void BcfHdf5Convertor::execute()
 
   // Write the AuxIndexingOptions Data
   {
-    outputFile.clear();
+    outFileStrm.str("");
     outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::AuxIndexingOptions;
-    QString semFile = outputFile;
+    std::string semFile = outFileStrm.str();
     // std::cout << "Extracting AuxIndexingOptions";
-    err = sfsFile.extractFile(tempDir.path().toStdString(), semFile.toStdString());
+    err = sfsFile.extractFile(tmpDir, semFile);
     if(err < 0)
     {
       m_ErrorCode = -7060;
-      m_ErrorMessage = QString("Could not extract EBSDData/AuxIndexingOptions File.");
+      m_ErrorMessage = std::string("Could not extract EBSDData/AuxIndexingOptions File.");
       return;
     }
-    semFile = tempDir.path() + "/" + semFile;
+    semFile = tmpDir + "/" + semFile;
 
     writeAuxIndexingOptions(semGrpId, headerGrpId, semFile);
   }
@@ -1193,34 +1254,34 @@ void BcfHdf5Convertor::execute()
   int32_t pixelByteCount = 0;
   // Write the CameraConfiguration Data
   {
-    outputFile.clear();
+    outFileStrm.str("");
     outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::CameraConfiguration;
-    QString semFile = outputFile;
+    std::string semFile = outFileStrm.str();
     // std::cout << "Extracting CameraConfiguration";
-    err = sfsFile.extractFile(tempDir.path().toStdString(), semFile.toStdString());
+    err = sfsFile.extractFile(tmpDir, semFile);
     if(err < 0)
     {
       m_ErrorCode = -7060;
-      m_ErrorMessage = QString("Could not extract EBSDData/CameraConfiguration File.");
+      m_ErrorMessage = std::string("Could not extract EBSDData/CameraConfiguration File.");
       return;
     }
-    semFile = tempDir.path() + "/" + semFile;
+    semFile = tmpDir + "/" + semFile;
 
     writeCameraConfiguration(semGrpId, headerGrpId, semFile);
     // Get the Pattern Pixel Byte Count
     err = H5Lite::readScalarDataset(headerGrpId, "PixelByteCount", pixelByteCount);
   }
 
-  outputFile.clear();
+  outFileStrm.str("");
   outFileStrm << Bruker::Files::EBSDData << "/" << Bruker::Files::FrameData;
-  QString dataFile = outputFile;
+  std::string dataFile = outFileStrm.str();
   if(pixelByteCount == 1)
   {
-    writePatternData<uint8_t>(sfsFile, H5T_NATIVE_UINT8, mapWidth, mapHeight, ebspWidth, ebspHeight, m_FlipPatterns, tempDir.path(), dataFile, descFile, dataGrpId);
+    writePatternData<uint8_t>(sfsFile, H5T_NATIVE_UINT8, mapWidth, mapHeight, ebspWidth, ebspHeight, m_FlipPatterns, tmpDir, dataFile, descFile, dataGrpId);
   }
   else if(pixelByteCount == 2)
   {
-    writePatternData<uint16_t>(sfsFile, H5T_NATIVE_UINT16, mapWidth, mapHeight, ebspWidth, ebspHeight, m_FlipPatterns, tempDir.path(), dataFile, descFile, dataGrpId);
+    writePatternData<uint16_t>(sfsFile, H5T_NATIVE_UINT16, mapWidth, mapHeight, ebspWidth, ebspHeight, m_FlipPatterns, tmpDir, dataFile, descFile, dataGrpId);
   }
 }
 
@@ -1231,7 +1292,7 @@ int32_t BcfHdf5Convertor::getErrorCode() const
 }
 
 // -----------------------------------------------------------------------------
-QString BcfHdf5Convertor::getErrorMessage() const
+std::string BcfHdf5Convertor::getErrorMessage() const
 {
   return m_ErrorMessage;
 }

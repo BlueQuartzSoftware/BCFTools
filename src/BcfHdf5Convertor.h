@@ -1,11 +1,11 @@
 #pragma once
 
-#include <QtCore/QString>
+#include <string>
 
 class BcfHdf5Convertor
 {
 public:
-  BcfHdf5Convertor(QString inputFile, QString outputFile);
+  BcfHdf5Convertor(std::string inputFile, std::string outputFile);
   ~BcfHdf5Convertor();
 
   BcfHdf5Convertor(const BcfHdf5Convertor&) = delete;            // Copy Constructor Not Implemented
@@ -18,13 +18,13 @@ public:
   void execute();
 
   int32_t getErrorCode() const;
-  QString getErrorMessage() const;
+  std::string getErrorMessage() const;
 
 private:
-  QString m_InputFile;
-  QString m_OutputFile;
+  std::string m_InputFile;
+  std::string m_OutputFile;
 
-  QString m_ErrorMessage = QString("No Error");
+  std::string m_ErrorMessage = std::string("No Error");
   int32_t m_ErrorCode = 0;
   bool m_Reorder = false;
   bool m_FlipPatterns = false;

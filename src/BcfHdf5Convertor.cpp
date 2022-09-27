@@ -941,6 +941,7 @@ void BcfHdf5Convertor::execute()
   // Qt will clean up the temp dir when it goes out of scope
 
   fs::path ifInfo(m_InputFile);
+  ifInfo = fs::absolute(ifInfo);
   std::string tmpDir = ifInfo.parent_path().string() + "/" + ifInfo.stem().string() + "_XXXXXX";
 
   std::error_code errorCode;
@@ -948,14 +949,13 @@ void BcfHdf5Convertor::execute()
   if(!result && errorCode.value() != 0)
   {
     m_ErrorCode = -7000;
-    m_ErrorMessage = std::string("Temp Directory could not be created.");
+    m_ErrorMessage = std::string("Temp Directory could not be created. ") + tmpDir;
     return;
   }
 
   TempDirectory tempDirectory(tmpDir);
 
   int32_t err = 0;
-
   hid_t fid = H5Utilities::createFile(m_OutputFile);
   H5ScopedFileSentinel fileSentinel(fid, k_ShowHdf5Errors);
 

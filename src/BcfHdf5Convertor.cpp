@@ -956,14 +956,46 @@ void BcfHdf5Convertor::execute()
   TempDirectory tempDirectory(tmpDir);
 
   int32_t err = 0;
-  hid_t fid = H5Utilities::createFile(m_OutputFile);
+  hid_t fid = -1;
+  bool exists = fs::exists(m_OutputFile);
+  if(exists)
+  {
+    std::cout << "Opening existing file.. " << std::endl;
+    fid = H5Utilities::openFile(m_OutputFile);
+  }
+  else
+  {
+    std::cout << "Creating File.." << std::endl;
+    fid = H5Utilities::createFile(m_OutputFile);
+  }
+
   H5ScopedFileSentinel fileSentinel(fid, k_ShowHdf5Errors);
 
   // ***************************************************************************
   // IF ANYTHING IN HERE CHANGES YOU NEED TO INCREMENT THE FILEVERSION NUMBER
   // WHICH INDICATES THAT THE ORGANIZATION HAS BEEN APPENDED/EDITED/REVISED.
   // ***************************************************************************
-  err = H5Lite::writeScalarAttribute(fid, "/", "FileVersion", ::k_FileVersion);
+  if(exists)
+  {
+    err = H5Lite::writeScalarAttribute(fid, "/", "FileVersion", ::k_FileVersion);
+    std::string manufacturer("DREAM.3D");
+    err = H5Lite::writeStringDataset(fid, ::k_Manufacturer, manufacturer);
+    if(err < 0)
+    {
+      m_ErrorCode = err;
+      m_ErrorMessage = std::string("Manufacturer Dataset was not written");
+      return;
+    }
+
+    std::string version = "0.2.0";
+    err = H5Lite::writeStringDataset(fid, ::k_Version, version);
+    if(err < 0)
+    {
+      m_ErrorCode = err;
+      m_ErrorMessage = std::string("Version Dataset was not written");
+      return;
+    }
+  }
 
 
   fs::path fi(m_InputFile);
@@ -984,23 +1016,7 @@ void BcfHdf5Convertor::execute()
   hid_t headerGrpId = H5Utilities::createGroup(ebsdGrpId, k_Header);
   fileSentinel.addGroupId(headerGrpId);
 
-  std::string manufacturer("DREAM.3D");
-  err = H5Lite::writeStringDataset(fid, ::k_Manufacturer, manufacturer);
-  if(err < 0)
-  {
-    m_ErrorCode = err;
-    m_ErrorMessage = std::string("Manufacturer Dataset was not written");
-    return;
-  }
-
-  std::string version = "0.2.0";
-  err = H5Lite::writeStringDataset(fid, ::k_Version, version);
-  if(err < 0)
-  {
-    m_ErrorCode = err;
-    m_ErrorMessage = std::string("Version Dataset was not written");
-    return;
-  }
+  
 
   SFSReader sfsFile;
   sfsFile.parseFile(m_InputFile);

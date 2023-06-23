@@ -51,6 +51,7 @@ namespace Bruker
   static const std::string PhaseList("PhaseList");
   static const std::string RadonLines("RadonLines");
   static const std::string SEMImage("SEMImage");
+  static const std::string SEMStageData("SEMStageData");
   static const std::string ShownPhaseList("ShownPhaseList");
   static const std::string Version("Version");
 

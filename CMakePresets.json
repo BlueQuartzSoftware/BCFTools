@@ -1,0 +1,181 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+      "major": 3,
+      "minor": 24,
+      "patch": 0
+    },
+    "configurePresets": [
+      {
+        "name": "ci",
+        "displayName": "CI build",
+        "description": "Build configuration for GitHub Actions CI",
+        "generator": "Ninja",
+        "binaryDir": "${sourceDir}/build",
+        "cacheVariables": {
+          "CMAKE_TOOLCHAIN_FILE": {
+            "type": "FILEPATH",
+            "value": "$env{VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake"
+          },
+          "CMAKE_BUILD_TYPE": {
+            "type": "STRING",
+            "value": "Release"
+          },
+          "SIMPLNX_BUILD_TESTS": {
+            "type": "BOOL",
+            "value": "ON"
+          },
+          "SIMPLNX_BUILD_DOCS": {
+            "type": "BOOL",
+            "value": "OFF"
+          },
+          "SIMPLNX_BUILD_PYTHON": {
+            "type": "BOOL",
+            "value": "ON"
+          },
+          "SIMPLNX_BUILD_PYTHON_TESTS": {
+            "type": "BOOL",
+            "value": "ON"
+          },
+          "SIMPLNX_BUILD_PYTHON_DOCS": {
+            "type": "BOOL",
+            "value": "ON"
+          },
+          "SIMPLNX_EMBED_PYTHON": {
+            "type": "BOOL",
+            "value": "OFF"
+          },
+          "DREAM3D_DATA_DIR": {
+            "type": "PATH",
+            "value": "${sourceDir}/DREAM3D_Data"
+          },
+          "VCPKG_MANIFEST_FEATURES": {
+            "type": "STRING",
+            "value": "tests;parallel"
+          },
+          "VCPKG_OVERLAY_TRIPLETS": {
+            "type": "PATH",
+            "value": "${sourceDir}/cmake/triplets"
+          }
+        }
+      },
+      {
+        "name": "ci-windows-v142",
+        "displayName": "ci-windows-v142",
+        "description": "Build configuration for GitHub Actions CI",
+        "generator": "Visual Studio 17 2022",
+        "inherits": "ci",
+        "cacheVariables": {
+          "VCPKG_TARGET_TRIPLET": {
+            "type": "STRING",
+            "value": "x64-windows-v142"
+          },
+          "VCPKG_HOST_TRIPLET": {
+            "type": "STRING",
+            "value": "x64-windows-v142"
+          }
+        }
+      },
+      {
+        "name": "ci-windows-v143",
+        "displayName": "ci-windows-v143",
+        "description": "Build configuration for GitHub Actions CI",
+        "generator": "Visual Studio 17 2022",
+        "inherits": "ci",
+        "cacheVariables": {
+          "VCPKG_TARGET_TRIPLET": {
+            "type": "STRING",
+            "value": "x64-windows-v143"
+          },
+          "VCPKG_HOST_TRIPLET": {
+            "type": "STRING",
+            "value": "x64-windows-v143"
+          }
+        }
+      },
+      {
+        "name": "ci-macos-x64",
+        "displayName": "ci-macos-x64",
+        "description": "Build configuration for GitHub Actions CI",
+        "generator": "Ninja",
+        "inherits": "ci",
+        "cacheVariables": {
+          "VCPKG_TARGET_TRIPLET": {
+            "type": "STRING",
+            "value": "x64-osx-v11"
+          },
+          "VCPKG_HOST_TRIPLET": {
+            "type": "STRING",
+            "value": "x64-osx-v11"
+          },
+          "Python3_EXECUTABLE": {
+            "type": "PATH",
+            "value": "/Users/runner/hostedtoolcache/Python/3.10.13/x64/bin/python3.10"
+          },
+          "SIMPLNX_PY_DISABLE_HIDDEN_VISIBILITY": {
+            "type": "BOOL",
+            "value": "ON"
+          }
+        }
+      },
+      {
+        "name": "ci-macos-arm64",
+        "displayName": "ci-macos-arm64",
+        "description": "Build configuration for GitHub Actions CI",
+        "generator": "Ninja",
+        "inherits": "ci",
+        "cacheVariables": {
+          "VCPKG_TARGET_TRIPLET": {
+            "type": "STRING",
+            "value": "arm64-osx-dynamic"
+          },
+          "VCPKG_HOST_TRIPLET": {
+            "type": "STRING",
+            "value": "arm64-osx-dynamic"
+          },
+          "Python3_EXECUTABLE": {
+            "type": "PATH",
+            "value": "/Users/runner/hostedtoolcache/Python/3.10.13/x64/bin/python3.10"
+          },
+          "SIMPLNX_PY_DISABLE_HIDDEN_VISIBILITY": {
+            "type": "BOOL",
+            "value": "ON"
+          }
+        }
+      },
+      {
+        "name": "ci-linux-x64",
+        "displayName": "ci-linux-x64",
+        "description": "Build configuration for GitHub Actions CI",
+        "generator": "Ninja",
+        "inherits": "ci",
+        "cacheVariables": {
+          "VCPKG_TARGET_TRIPLET": {
+            "type": "STRING",
+            "value": "x64-linux-dynamic"
+          },
+          "VCPKG_HOST_TRIPLET": {
+            "type": "STRING",
+            "value": "x64-linux-dynamic"
+          },
+          "Python3_EXECUTABLE": {
+            "type": "PATH",
+            "value": "/opt/hostedtoolcache/Python/3.10.13/x64/bin/python3.10"
+          }
+        }
+      }
+    ],
+    "buildPresets": [
+      {
+        "name": "ci-windows-v142",
+        "displayName": "ci-windows-v142 Release build",
+        "description": "Build configuration for GitHub actions CI",
+        "configurePreset": "ci-windows-v142",
+        "configuration": "Release"
+      }
+    ],
+    "testPresets": [
+
+    ]
+  }
+  

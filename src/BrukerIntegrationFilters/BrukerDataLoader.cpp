@@ -49,6 +49,8 @@
 #include <fstream>
 #include <sstream>
 
+#include <cstring>
+
 #ifdef SIMPL_USE_GHC_FILESYSTEM
 #include <ghc/filesystem.hpp>
 namespace fs = ghc::filesystem;
@@ -317,11 +319,13 @@ int BrukerDataLoader::LoadIndexingResults(const std::string& descFile, const std
   size_t scannedPointCount = 0;
   fpos_t pos;
   fgetpos(f, &pos);
-#if defined(Q_OS_LINUX)
-  while(pos.__pos < filesize)
+
+#if defined(__WIN32__) || defined (__APPLE__)
+while(pos < filesize)
 #else
-  while(pos < filesize)
+while(pos.__pos < filesize)
 #endif
+
   {
     ::memset(data, 0, 30); // Splat zeros across the structure.
     nRead = fread(&data, 1, 30, f);

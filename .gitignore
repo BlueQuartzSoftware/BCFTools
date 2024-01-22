@@ -31,3 +31,4 @@ Workspace
 cmake-build-debug-visual-studio
 cmake-build-release-visual-studio
 .cache
+.cmake

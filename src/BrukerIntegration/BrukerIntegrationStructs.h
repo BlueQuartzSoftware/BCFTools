@@ -38,9 +38,9 @@ typedef struct
     uint16_t yIndex;
     float radonQuality;
     uint16_t detectedBands;
-    float   euler1; // radians
-    float   euler2; // radians
     float   euler3; // radians
+    float   euler2; // radians
+    float   euler1; // radians
     int16_t phase; //Has byte value of 0xFFFF
     uint16_t indexedBands;
     float   bmm;

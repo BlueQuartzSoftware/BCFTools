@@ -19,35 +19,7 @@
           },
           "CMAKE_BUILD_TYPE": {
             "type": "STRING",
-            "value": "Release"
-          },
-          "SIMPLNX_BUILD_TESTS": {
-            "type": "BOOL",
-            "value": "ON"
-          },
-          "SIMPLNX_BUILD_DOCS": {
-            "type": "BOOL",
-            "value": "OFF"
-          },
-          "SIMPLNX_BUILD_PYTHON": {
-            "type": "BOOL",
-            "value": "ON"
-          },
-          "SIMPLNX_BUILD_PYTHON_TESTS": {
-            "type": "BOOL",
-            "value": "ON"
-          },
-          "SIMPLNX_BUILD_PYTHON_DOCS": {
-            "type": "BOOL",
-            "value": "ON"
-          },
-          "SIMPLNX_EMBED_PYTHON": {
-            "type": "BOOL",
-            "value": "OFF"
-          },
-          "DREAM3D_DATA_DIR": {
-            "type": "PATH",
-            "value": "${sourceDir}/DREAM3D_Data"
+            "value": "Debug"
           },
           "VCPKG_MANIFEST_FEATURES": {
             "type": "STRING",
@@ -94,9 +66,9 @@
         }
       },
       {
-        "name": "ci-macos-x64",
-        "displayName": "ci-macos-x64",
-        "description": "Build configuration for GitHub Actions CI",
+        "name": "ci-macos-x64-Debug",
+        "displayName": "ci-macos-x64-Debug",
+        "description": "Build configuration for Debug",
         "generator": "Ninja",
         "inherits": "ci",
         "cacheVariables": {
@@ -119,10 +91,11 @@
         }
       },
       {
-        "name": "ci-macos-arm64",
-        "displayName": "ci-macos-arm64",
-        "description": "Build configuration for GitHub Actions CI",
+        "name": "ci-macos-arm64-Release",
+        "displayName": "ci-macos-arm64-Release",
+        "description": "Build configuration for Release",
         "generator": "Ninja",
+        "binaryDir": "Release",
         "inherits": "ci",
         "cacheVariables": {
           "VCPKG_TARGET_TRIPLET": {
@@ -140,6 +113,40 @@
           "SIMPLNX_PY_DISABLE_HIDDEN_VISIBILITY": {
             "type": "BOOL",
             "value": "ON"
+          },
+          "CMAKE_BUILD_TYPE": {
+            "type": "STRING",
+            "value": "Release"
+          }
+        }
+      },
+      {
+        "name": "ci-macos-arm64-Debug",
+        "displayName": "ci-macos-arm64-Debug",
+        "description": "Build configuration for Debug",
+        "generator": "Ninja",
+        "binaryDir": "Debug",
+        "inherits": "ci",
+        "cacheVariables": {
+          "VCPKG_TARGET_TRIPLET": {
+            "type": "STRING",
+            "value": "arm64-osx-dynamic"
+          },
+          "VCPKG_HOST_TRIPLET": {
+            "type": "STRING",
+            "value": "arm64-osx-dynamic"
+          },
+          "Python3_EXECUTABLE": {
+            "type": "PATH",
+            "value": "/Users/runner/hostedtoolcache/Python/3.10.13/x64/bin/python3.10"
+          },
+          "SIMPLNX_PY_DISABLE_HIDDEN_VISIBILITY": {
+            "type": "BOOL",
+            "value": "ON"
+          },
+          "CMAKE_BUILD_TYPE": {
+            "type": "STRING",
+            "value": "Debug"
           }
         }
       },
@@ -178,4 +185,3 @@
 
     ]
   }
-  

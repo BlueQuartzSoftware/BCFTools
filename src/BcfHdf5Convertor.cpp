@@ -47,7 +47,8 @@ namespace fs = ghc::filesystem;
 namespace fs = std::filesystem;
 #endif
 
-
+#define BCFTOOLS_VERSION_STRING(arg) \
+ #arg
 
 using XmlDocumentType = std::shared_ptr<pugi::xml_document>;
 
@@ -66,7 +67,7 @@ const std::string k_Version("Version");
 const std::string k_Data("Data");
 const std::string k_Header("Header");
 
-const int32_t k_FileVersion = 3;
+const int32_t k_FileVersion = 4;
 
 /******************************************************************************
  * START TIFF WRITING SECTION
@@ -348,7 +349,7 @@ int32_t writeCalibrationData(hid_t semGrpId, hid_t ebsdGrpId, const std::string&
   pcy = classInstance.first_element_by_path("PCY").text().as_double(-1.0);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "PCX", pcy);
 
-  float sampleTilt = classInstance.first_element_by_path("ProbeTilt").text().as_double(-1.0);
+  double sampleTilt = classInstance.first_element_by_path("ProbeTilt").text().as_double(-1.0);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "SampleTilt", sampleTilt);
 
 
@@ -401,14 +402,14 @@ int32_t writeSEMData(hid_t semGrpId, hid_t ebsdGrpId, const std::string& semFile
 
   std::vector<hsize_t> tDims = {static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
 
-  float xRes = classInstance.first_element_by_path("XCalibration").text().as_float(std::numeric_limits<float>::max());
-  if(xRes == 0.0) { xRes = 1.0f;}
+  double xRes = classInstance.first_element_by_path("XCalibration").text().as_float(std::numeric_limits<float>::max());
+  if(xRes == 0.0) { xRes = 1.0;}
   err = H5Lite::writeScalarDataset(semGrpId, "SEM XResolution", xRes);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "SEPixelSizeX", xRes);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "XSTEP", xRes);
 
-  float yRes = classInstance.first_element_by_path("YCalibration").text().as_float(std::numeric_limits<float>::max());
-  if(yRes == 0.0) { yRes = 1.0f; }
+  double yRes = classInstance.first_element_by_path("YCalibration").text().as_float(std::numeric_limits<float>::max());
+  if(yRes == 0.0) { yRes = 1.0; }
   err = H5Lite::writeScalarDataset(semGrpId, "SEM YResolution", yRes);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "SEPixelSizeY", yRes);
   err = H5Lite::writeScalarDataset(ebsdGrpId, "YSTEP", yRes);
@@ -469,8 +470,8 @@ int32_t writeSEMData(hid_t semGrpId, hid_t ebsdGrpId, const std::string& semFile
     }
   }
 
-  float semKV = 0.0f;
-  float semMag = -1.0f;
+  double semKV = 0.0f;
+  double semMag = -1.0f;
 
   auto trtHeaderedClass = classInstance.first_element_by_path("TRTHeaderedClass");
   auto tRTREMHeader = trtHeaderedClass.first_element_by_path("ClassInstance");
@@ -978,7 +979,7 @@ void BcfHdf5Convertor::execute()
   if(exists)
   {
     err = H5Lite::writeScalarAttribute(fid, "/", "FileVersion", ::k_FileVersion);
-    std::string manufacturer("DREAM.3D");
+    std::string manufacturer("BCFTools");
     err = H5Lite::writeStringDataset(fid, ::k_Manufacturer, manufacturer);
     if(err < 0)
     {
@@ -987,7 +988,7 @@ void BcfHdf5Convertor::execute()
       return;
     }
 
-    std::string version = "0.2.0";
+    std::string version = BCFTools_VERSION;
     err = H5Lite::writeStringDataset(fid, ::k_Version, version);
     if(err < 0)
     {
@@ -1010,13 +1011,13 @@ void BcfHdf5Convertor::execute()
   hid_t dataGrpId = H5Utilities::createGroup(ebsdGrpId, k_Data);
   fileSentinel.addGroupId(dataGrpId);
 
-  hid_t semGrpId = H5Utilities::createGroup(topGrpId, k_SEM);
+  hid_t semGrpId = H5Utilities::createGroup(ebsdGrpId, k_SEM);
   fileSentinel.addGroupId(semGrpId);
 
   hid_t headerGrpId = H5Utilities::createGroup(ebsdGrpId, k_Header);
   fileSentinel.addGroupId(headerGrpId);
 
-  
+
 
   SFSReader sfsFile;
   sfsFile.parseFile(m_InputFile);
@@ -1077,9 +1078,9 @@ void BcfHdf5Convertor::execute()
     m_ErrorCode = -7050;
     return;
   }
-  auto numElements = static_cast<size_t>(mapWidth * mapHeight);
+  auto numElements = static_cast<int32_t>(mapWidth * mapHeight);
   std::vector<size_t> cDims = {2};
-  std::vector<size_t> tDims = {numElements};
+  std::vector<int32_t > tDims = {numElements};
 
   std::vector<uint16_t> roi;
 
@@ -1137,7 +1138,11 @@ void BcfHdf5Convertor::execute()
       euler->setName(names.at(c));
       for(size_t i = 0; i < numElements; i++)
       {
-        float value = eulers->getComponent(i, c) * 57.295779513082323;
+        float value = eulers->getComponent(i, c) * 57.295779513082323;  // This will convert from Radians to Degrees.. Looks like we do not do that any more?
+        if(c==0 || c==2)
+        {
+          value = 180.0 - value;
+        }
         euler->setValue(i, value);
       }
       err = writeDataArrayToHdf5(euler.get(), dataGrpId, numElements);

@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.19)
 
 
 project(BCFTools
-  VERSION 0.1.0
-  DESCRIPTION "SFS Reader"
+  VERSION 0.3.0
+  DESCRIPTION "Tools to Decompress and Convert .bcf files"
   HOMEPAGE_URL ""
   LANGUAGES CXX
   )
@@ -88,7 +88,7 @@ set(unbcf_sources
 )
 
 add_executable(unbcf ${unbcf_sources} ${BCFTools_SOURCE_DIR}/src/unbcf.cpp)
-
+target_compile_definitions(unbcf PRIVATE "-DBCFTools_VERSION=\"${BCFTools_VERSION}\"")
 
 #-------------------------------------------------------------------------------
 # bcftohdf5 executable
@@ -124,3 +124,4 @@ target_include_directories(bcf2hdf5 PUBLIC
                            ${BCFTools_BINARY_DIR}/3rdparty/hdf5/src
                            ${BCFTools_SOURCE_DIR}/3rdparty/pugixml/src
                            )
+target_compile_definitions(bcf2hdf5 PRIVATE "-DBCFTools_VERSION=\"${BCFTools_VERSION}\"")

@@ -99,7 +99,7 @@ namespace BlueQuartz
 {
   const std::string VendorName("BlueQuartz Software, LLC");
   const std::string URL("http://www.bluequartz.net");
-  const std::string Copyright("(C) 2016-2019 BlueQuartz Software, LLC");
+  const std::string Copyright("(C) 2016-2024 BlueQuartz Software, LLC");
 }
 
 

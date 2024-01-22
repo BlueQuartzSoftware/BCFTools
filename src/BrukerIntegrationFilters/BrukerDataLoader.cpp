@@ -368,9 +368,9 @@ while(pos.__pos < filesize)
     posPtr[index * 2] = record->xIndex;
     posPtr[index * 2 + 1] = record->yIndex;
 
-    euPtr[index * 3] = (M_PI - record->euler3);
+    euPtr[index * 3] = record->euler1;
     euPtr[index * 3 + 1] = record->euler2;
-    euPtr[index * 3 + 2] = (M_PI - record->euler1);
+    euPtr[index * 3 + 2] = record->euler3;
 
     pq[index] = record->radonQuality;
     detBnds[index] = record->detectedBands;
